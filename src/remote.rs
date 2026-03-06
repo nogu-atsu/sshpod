@@ -212,13 +212,6 @@ PermitUserEnvironment yes
 EOF
 
   printf 'SetEnv PATH=%s\n' "$REMOTE_PATH" >> "$BASE/sshd_config"
-  for key in $ENV_EXPORTS; do
-    val="$(printenv "$key" || true)"
-    printf 'SetEnv %s=%s\n' "$key" "$val" >> "$BASE/sshd_config"
-  done
-  if [ -n "${KUBECONFIG:-}" ]; then
-    printf 'SetEnv KUBECONFIG=%s\n' "$KUBECONFIG" >> "$BASE/sshd_config"
-  fi
   if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
     mkdir -p "$USER_HOME/.ssh"
     {

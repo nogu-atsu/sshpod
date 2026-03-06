@@ -168,7 +168,22 @@ rand_port() {
 }
 
 REMOTE_PATH="${PATH:-/usr/bin:/bin}"
-ENV_EXPORTS="$(env | awk -F= '/^KUBERNETES_/ {print $1}')"
+ENV_EXPORTS="$(env | awk -F= '
+  $1 != "HOME" &&
+  $1 != "KUBECONFIG" &&
+  $1 != "LOGNAME" &&
+  $1 != "MAIL" &&
+  $1 != "OLDPWD" &&
+  $1 != "PATH" &&
+  $1 != "PWD" &&
+  $1 != "SHELL" &&
+  $1 != "SHLVL" &&
+  $1 != "TERM" &&
+  $1 != "USER" &&
+  $1 != "_" &&
+  $1 !~ /^SSH_/ &&
+  $1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ {print $1}
+')"
 USER_HOME="$(get_home "$LOGIN_USER")"
 
 i=0
@@ -197,13 +212,6 @@ PermitUserEnvironment yes
 EOF
 
   printf 'SetEnv PATH=%s\n' "$REMOTE_PATH" >> "$BASE/sshd_config"
-  for key in $ENV_EXPORTS; do
-    val="$(printenv "$key" || true)"
-    printf 'SetEnv %s=%s\n' "$key" "$val" >> "$BASE/sshd_config"
-  done
-  if [ -n "${KUBECONFIG:-}" ]; then
-    printf 'SetEnv KUBECONFIG=%s\n' "$KUBECONFIG" >> "$BASE/sshd_config"
-  fi
   if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
     mkdir -p "$USER_HOME/.ssh"
     {

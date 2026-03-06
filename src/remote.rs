@@ -168,7 +168,22 @@ rand_port() {
 }
 
 REMOTE_PATH="${PATH:-/usr/bin:/bin}"
-ENV_EXPORTS="$(env | awk -F= '/^KUBERNETES_/ {print $1}')"
+ENV_EXPORTS="$(env | awk -F= '
+  $1 != "HOME" &&
+  $1 != "KUBECONFIG" &&
+  $1 != "LOGNAME" &&
+  $1 != "MAIL" &&
+  $1 != "OLDPWD" &&
+  $1 != "PATH" &&
+  $1 != "PWD" &&
+  $1 != "SHELL" &&
+  $1 != "SHLVL" &&
+  $1 != "TERM" &&
+  $1 != "USER" &&
+  $1 != "_" &&
+  $1 !~ /^SSH_/ &&
+  $1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ {print $1}
+')"
 USER_HOME="$(get_home "$LOGIN_USER")"
 
 i=0

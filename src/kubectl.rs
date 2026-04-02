@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::{Output, Stdio};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -163,8 +164,32 @@ struct JobStatus {
     ready: Option<u32>,
 }
 
+pub fn kubectl_program() -> String {
+    for var in ["SSHPOD_KUBECTL", "KUBECTL"] {
+        if let Ok(value) = std::env::var(var) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    for candidate in [
+        "/usr/local/bin/kubectl",
+        "/opt/homebrew/bin/kubectl",
+        "/usr/bin/kubectl",
+        "/snap/bin/kubectl",
+    ] {
+        if Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+
+    "kubectl".to_string()
+}
+
 fn kubectl_base(context: Option<&str>) -> Command {
-    let mut cmd = Command::new("kubectl");
+    let mut cmd = Command::new(kubectl_program());
     if let Some(ctx) = context {
         cmd.arg("--context").arg(ctx);
     }
@@ -226,7 +251,7 @@ pub async fn ensure_context_exists(context: &str) -> Result<()> {
 }
 
 pub async fn list_contexts() -> Result<Vec<String>> {
-    let output = Command::new("kubectl")
+    let output = Command::new(kubectl_program())
         .args(["config", "get-contexts", "-o", "name"])
         .output()
         .await
@@ -246,7 +271,7 @@ pub async fn list_contexts() -> Result<Vec<String>> {
 }
 
 pub async fn get_context_namespace(context: &str) -> Result<Option<String>> {
-    let output = Command::new("kubectl")
+    let output = Command::new(kubectl_program())
         .args([
             "config",
             "view",

@@ -1,3 +1,4 @@
+use crate::kubectl;
 use anyhow::{anyhow, Context, Result};
 use log::debug;
 use std::process::Stdio;
@@ -19,7 +20,7 @@ impl PortForward {
         pod: &str,
         remote_port: u16,
     ) -> Result<(PortForward, u16)> {
-        let mut cmd = Command::new("kubectl");
+        let mut cmd = Command::new(kubectl::kubectl_program());
         if let Some(ctx) = context {
             cmd.arg("--context").arg(ctx);
         }

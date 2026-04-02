@@ -62,6 +62,25 @@ chmod 600 "$PRIV" "$PUB"
     Ok(())
 }
 
+pub async fn existing_sshd_port(target: &RemoteTarget, base: &str) -> Result<Option<u16>> {
+    let check_cmd = format!(
+        r#"if [ -f "{base}/sshd.pid" ] && [ -f "{base}/sshd.port" ] && kill -0 "$(cat "{base}/sshd.pid")" 2>/dev/null; then
+  cat "{base}/sshd.port"
+else
+  exit 1
+fi"#
+    );
+    let output = kubectl::exec_capture_optional_target(target, &["sh", "-c", &check_cmd]).await?;
+    let Some(port) = output else {
+        return Ok(None);
+    };
+    let port = port
+        .trim()
+        .parse()
+        .with_context(|| format!("unexpected sshd port output: {}", port))?;
+    Ok(Some(port))
+}
+
 pub async fn ensure_sshd_running(
     target: &RemoteTarget,
     base: &str,

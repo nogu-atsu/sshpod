@@ -104,28 +104,38 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     let local_key = keys::ensure_key("id_ed25519")
         .await
         .context("failed to ensure ~/.cache/sshpod/id_ed25519 exists")?;
-    let host_keys = keys::ensure_key("ssh_host_ed25519_key")
-        .await
-        .context("failed to create host keys")?;
 
     remote::try_acquire_lock(&target, &base).await;
-    remote::assert_login_user_allowed(&target, &login_user).await?;
+    let remote_port = if let Some(port) = remote::existing_sshd_port(&target, &base).await? {
+        info!(
+            "[sshpod] reusing existing sshd on 127.0.0.1:{} (pod {})",
+            port, pod_name
+        );
+        port
+    } else {
+        remote::assert_login_user_allowed(&target, &login_user).await?;
 
-    let arch = bundle::detect_remote_arch(&target)
-        .await
-        .context("failed to detect remote arch")?;
-    info!("[sshpod] remote architecture: {}", arch);
-    bundle::ensure_bundle(&target, &base, &arch).await?;
-    info!("[sshpod] sshd bundle ready for pod {}", pod_name);
-    remote::install_host_keys(&target, &base, &host_keys).await?;
+        let arch = bundle::detect_remote_arch(&target)
+            .await
+            .context("failed to detect remote arch")?;
+        info!("[sshpod] remote architecture: {}", arch);
+        bundle::ensure_bundle(&target, &base, &arch).await?;
+        info!("[sshpod] sshd bundle ready for pod {}", pod_name);
 
-    info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
-    let remote_port =
-        remote::ensure_sshd_running(&target, &base, &login_user, &local_key.public).await?;
-    info!(
-        "[sshpod] sshd is listening on 127.0.0.1:{} (pod {})",
-        remote_port, pod_name
-    );
+        let host_keys = keys::ensure_key("ssh_host_ed25519_key")
+            .await
+            .context("failed to create host keys")?;
+        remote::install_host_keys(&target, &base, &host_keys).await?;
+
+        info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
+        let port =
+            remote::ensure_sshd_running(&target, &base, &login_user, &local_key.public).await?;
+        info!(
+            "[sshpod] sshd is listening on 127.0.0.1:{} (pod {})",
+            port, pod_name
+        );
+        port
+    };
 
     info!(
         "[sshpod] starting port-forward to {}:{}",

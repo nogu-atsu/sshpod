@@ -67,8 +67,15 @@ impl PortForward {
                         }
                     }
                     line = stderr_reader.next_line() => {
-                        if let Some(l) = line.context("failed to read port-forward stderr")? {
-                            debug!("[port-forward] {}", l)
+                        match line.context("failed to read port-forward stderr")? {
+                            Some(l) => {
+                                if let Some(port) = parse_port(&l) {
+                                    debug!("[port-forward] {}", l);
+                                    break Ok(port);
+                                }
+                                debug!("[port-forward] {}", l)
+                            }
+                            None => break Err(anyhow!("kubectl port-forward exited before reporting a port")),
                         }
                     }
                     status = child.wait() => {
@@ -127,4 +134,26 @@ fn parse_port(line: &str) -> Option<u16> {
     let token = line.split_whitespace().find(|p| p.contains(':'))?;
     let (_, port_str) = token.rsplit_once(':')?;
     port_str.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_port;
+
+    #[test]
+    fn parse_port_extracts_local_port_from_ipv4_line() {
+        let line = "Forwarding from 127.0.0.1:51486 -> 23990";
+        assert_eq!(parse_port(line), Some(51486));
+    }
+
+    #[test]
+    fn parse_port_extracts_local_port_from_ipv6_line() {
+        let line = "Forwarding from [::1]:51486 -> 23990";
+        assert_eq!(parse_port(line), Some(51486));
+    }
+
+    #[test]
+    fn parse_port_ignores_non_forwarding_lines() {
+        assert_eq!(parse_port("Handling connection for 23990"), None);
+    }
 }

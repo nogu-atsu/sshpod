@@ -142,22 +142,7 @@ async fn resolve_remote_target(
         .await
         .with_context(|| format!("failed to inspect pod {}.{}", pod_name, ns_str))?;
 
-    let container = match host.container.as_ref() {
-        Some(c) => {
-            if pod_info.containers.iter().any(|name| name == c) {
-                c.clone()
-            } else {
-                bail!("container `{}` not found in pod {}", c, pod_name);
-            }
-        }
-        None => {
-            if pod_info.containers.len() == 1 {
-                pod_info.containers[0].clone()
-            } else {
-                bail!("This Pod has multiple containers. Use container--<container>.pod--<pod>.namespace--<namespace>[.context--<context>].sshpod to specify the target container.");
-            }
-        }
-    };
+    let container = select_container(host.container.as_deref(), &pod_info, &pod_name)?;
     info!("[sshpod] resolved container: {}", container);
 
     let target = RemoteTarget {
@@ -168,6 +153,46 @@ async fn resolve_remote_target(
     };
 
     Ok((target, pod_info))
+}
+
+fn select_container(
+    requested_container: Option<&str>,
+    pod_info: &kubectl::PodInfo,
+    pod_name: &str,
+) -> Result<String> {
+    match requested_container {
+        Some(c) => {
+            if pod_info.containers.iter().any(|name| name == c) {
+                Ok(c.to_string())
+            } else {
+                bail!("container `{}` not found in pod {}", c, pod_name);
+            }
+        }
+        None => {
+            if let Some(default_container) = &pod_info.default_container {
+                if pod_info
+                    .containers
+                    .iter()
+                    .any(|name| name == default_container)
+                {
+                    return Ok(default_container.clone());
+                }
+                bail!(
+                    "Pod {} has default container annotation set to `{}`, but that container was not found. Available containers: {}",
+                    pod_name,
+                    default_container,
+                    pod_info.containers.join(", ")
+                );
+            }
+            if let [container] = pod_info.containers.as_slice() {
+                Ok(container.clone())
+            } else if let Some(container) = pod_info.containers.first() {
+                Ok(container.clone())
+            } else {
+                bail!("Pod {} has no containers", pod_name);
+            }
+        }
+    }
 }
 
 pub async fn run(args: ProxyArgs) -> Result<()> {
@@ -201,7 +226,8 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     let cached_remote_port = read_cached_remote_port(&pod_uid, &container).await?;
     log_step_done("read cached remote sshd port", cached_port_read_start);
 
-    let (mut forward, remote_port, local_port) = if let Some(cached_remote_port) = cached_remote_port
+    let (mut forward, remote_port, local_port) = if let Some(cached_remote_port) =
+        cached_remote_port
     {
         info!(
             "[sshpod] trying cached remote sshd on 127.0.0.1:{} (pod {})",
@@ -233,7 +259,9 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
                 remove_cached_remote_port(&pod_uid, &container).await?;
 
                 let remote_sshd_start = Instant::now();
-                let remote_port = if let Some(port) = remote::existing_sshd_port(&target, &base).await? {
+                let remote_port = if let Some(port) =
+                    remote::existing_sshd_port(&target, &base).await?
+                {
                     log_step_done("checked existing remote sshd", remote_sshd_start);
                     info!(
                         "[sshpod] reusing existing sshd on 127.0.0.1:{} (pod {})",
@@ -275,13 +303,9 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
 
                     info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
                     let ensure_sshd_start = Instant::now();
-                    let port = remote::ensure_sshd_running(
-                        &target,
-                        &base,
-                        &login_user,
-                        &local_key.public,
-                    )
-                    .await?;
+                    let port =
+                        remote::ensure_sshd_running(&target, &base, &login_user, &local_key.public)
+                            .await?;
                     log_step_done("started remote sshd", ensure_sshd_start);
                     info!(
                         "[sshpod] sshd is listening on 127.0.0.1:{} (pod {})",
@@ -352,8 +376,7 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
             info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
             let ensure_sshd_start = Instant::now();
             let port =
-                remote::ensure_sshd_running(&target, &base, &login_user, &local_key.public)
-                    .await?;
+                remote::ensure_sshd_running(&target, &base, &login_user, &local_key.public).await?;
             log_step_done("started remote sshd", ensure_sshd_start);
             info!(
                 "[sshpod] sshd is listening on 127.0.0.1:{} (pod {})",
@@ -397,4 +420,52 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     pump_result?;
     stop_result?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pod_info(containers: &[&str], default_container: Option<&str>) -> kubectl::PodInfo {
+        kubectl::PodInfo {
+            uid: "pod-uid".into(),
+            containers: containers.iter().map(|name| (*name).into()).collect(),
+            default_container: default_container.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn select_container_uses_requested_container() {
+        let info = pod_info(&["app", "sidecar"], Some("app"));
+        let selected = select_container(Some("sidecar"), &info, "pod").unwrap();
+        assert_eq!(selected, "sidecar");
+    }
+
+    #[test]
+    fn select_container_uses_default_container_annotation() {
+        let info = pod_info(&["app", "sidecar"], Some("app"));
+        let selected = select_container(None, &info, "pod").unwrap();
+        assert_eq!(selected, "app");
+    }
+
+    #[test]
+    fn select_container_uses_only_container_without_annotation() {
+        let info = pod_info(&["app"], None);
+        let selected = select_container(None, &info, "pod").unwrap();
+        assert_eq!(selected, "app");
+    }
+
+    #[test]
+    fn select_container_rejects_invalid_default_container_annotation() {
+        let info = pod_info(&["app", "sidecar"], Some("missing"));
+        let err = select_container(None, &info, "pod").unwrap_err();
+        assert!(err.to_string().contains("default container annotation"));
+    }
+
+    #[test]
+    fn select_container_uses_first_container_without_default() {
+        let info = pod_info(&["app", "sidecar"], None);
+        let selected = select_container(None, &info, "pod").unwrap();
+        assert_eq!(selected, "app");
+    }
 }

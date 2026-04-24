@@ -18,6 +18,7 @@ pub struct RemoteTarget {
 pub struct PodInfo {
     pub uid: String,
     pub containers: Vec<String>,
+    pub default_container: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -29,6 +30,8 @@ struct Pod {
 #[derive(Deserialize)]
 struct PodMetadata {
     uid: String,
+    #[serde(default)]
+    annotations: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -309,6 +312,11 @@ pub async fn get_pod_info(context: Option<&str>, namespace: &str, pod: &str) -> 
     .await?;
 
     Ok(PodInfo {
+        default_container: parsed
+            .metadata
+            .annotations
+            .get("kubectl.kubernetes.io/default-container")
+            .cloned(),
         uid: parsed.metadata.uid,
         containers: parsed.spec.containers.into_iter().map(|c| c.name).collect(),
     })

@@ -45,7 +45,7 @@ scp ./local.tgz ubuntu@job--batch.namespace--etl.context--dev.sshpod:/tmp/
 ```
 - `.sshpod` サフィックスは必須（DNS への登録は不要）。
 - 対象は `pod--<pod>`、`deployment--<deployment>`、`job--<job>` のいずれかで指定します。Deployment/Job は Ready な Pod を自動で選択します。
-- オプション: `container--<container>`（マルチコンテナ Pod では必須）、`namespace--<namespace>`（コンテキストに設定された namespace があればそれを、無い場合はクラスタのデフォルトを使用）、`context--<context>`（省略時は現在の `kubectl` コンテキスト）。
+- オプション: `container--<container>`（省略時は `kubectl exec` と同様に、`kubectl.kubernetes.io/default-container` annotation があればそれを使い、無ければ先頭コンテナを使います）、`namespace--<namespace>`（コンテキストに設定された namespace があればそれを、無い場合はクラスタのデフォルトを使用）、`context--<context>`（省略時は現在の `kubectl` コンテキスト）。
 - Pod が非 root で動いている場合、SSH ユーザはコンテナ内の実ユーザと一致させてください。root Pod であれば任意のユーザで接続できます。
 
 ## 要件
